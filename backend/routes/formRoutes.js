@@ -1,78 +1,80 @@
 const express = require('express');
 const multer = require('multer');
-const { registrationHelpers } = require('../utils/firebase');
-const { registrationUploads } = require('../utils/s3Uploader');
+const { v4: uuidv4 } = require('uuid');
+const { addDocument } = require('../utils/firebase');
+const { uploadToS3 } = require('../utils/s3Uploader');
 
 const router = express.Router();
 
 // Configure multer for file uploads
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: {
-    fileSize: 3 * 1024 * 1024, // 3MB max file size
-    files: 3 // Maximum 3 files
-  },
-  fileFilter: (req, file, cb) => {
-    // Only allow PDF files
+const storage = multer.memoryStorage();
+
+const fileFilter = (req, file, cb) => {
+    // Check file type
     if (file.mimetype === 'application/pdf') {
       cb(null, true);
     } else {
       cb(new Error('Only PDF files are allowed'), false);
     }
-  }
+};
+
+const upload = multer({
+    storage: storage,
+    fileFilter: fileFilter,
+    limits: {
+        fileSize: 3 * 1024 * 1024, // 3MB max file size
+        files: 3 // Maximum 3 files
+    }
 });
 
-// Form submission endpoint
-router.post('/submit', upload.fields([
+// Handle form submission with file uploads
+router.post('/', upload.fields([
   { name: 'idCard', maxCount: 1 },
   { name: 'munCertificates', maxCount: 1 },
   { name: 'chairingResume', maxCount: 1 }
 ]), async (req, res) => {
   try {
-    // Validate required fields
-    const requiredFields = [
-      'name', 'email', 'phone', 'college', 'department', 'year',
-      'munsParticipated', 'munsWithAwards', 'organizingExperience', 'munsChaired',
-      'committees', 'positions'
-    ];
+        console.log('Form submission received');
+        console.log('Files:', req.files);
+        console.log('Body:', req.body);
 
-    const missingFields = requiredFields.filter(field => !req.body[field]);
-    if (missingFields.length > 0) {
+    // Validate required fields
+        const requiredFields = ['name', 'email', 'phone', 'college', 'department', 'year'];
+        for (const field of requiredFields) {
+            if (!req.body[field]) {
       return res.status(400).json({
         success: false,
-        message: `Missing required fields: ${missingFields.join(', ')}`
+                    message: `Missing required field: ${field}`
       });
+            }
     }
 
-    // Validate ID card upload
+        // Validate required file
     if (!req.files || !req.files.idCard) {
       return res.status(400).json({
         success: false,
-        message: 'ID Card upload is required'
-      });
-    }
+                message: 'ID Card is required'
+            });
+        }
 
-    // Validate email format
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(req.body.email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide a valid email address'
-      });
-    }
+        // Parse checkbox values
+        let committees = [];
+        let positions = [];
 
-    // Validate committees and positions
-    let committees, positions;
-    try {
+        try {
+            if (req.body.committees) {
       committees = JSON.parse(req.body.committees);
+            }
+            if (req.body.positions) {
       positions = JSON.parse(req.body.positions);
+            }
     } catch (error) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid committees or positions format'
-      });
-    }
+            console.error('Error parsing checkbox values:', error);
+            committees = req.body.committees ? [req.body.committees] : [];
+            positions = req.body.positions ? [req.body.positions] : [];
+        }
 
+        // Validate checkbox selections
     if (!Array.isArray(committees) || committees.length === 0) {
       return res.status(400).json({
         success: false,
@@ -87,108 +89,97 @@ router.post('/submit', upload.fields([
       });
     }
 
-    // Validate numeric fields
-    const numericFields = ['munsParticipated', 'munsWithAwards', 'munsChaired'];
-    for (const field of numericFields) {
-      const value = parseInt(req.body[field]);
-      if (isNaN(value) || value < 0) {
-        return res.status(400).json({
-          success: false,
-          message: `${field} must be a non-negative number`
-        });
-      }
-    }
+        // Upload files to S3
+        const fileUrls = {};
+        const uploadPromises = [];
 
-    // Prepare registration data
-    const registrationData = {
-      // Personal details
-      name: req.body.name.trim(),
-      email: req.body.email.trim().toLowerCase(),
-      phone: req.body.phone.trim(),
-      college: req.body.college.trim(),
-      department: req.body.department.trim(),
+        // Upload ID Card
+        if (req.files.idCard) {
+            const idCardFile = req.files.idCard[0];
+            const idCardKey = `id-cards/${uuidv4()}-${idCardFile.originalname}`;
+            uploadPromises.push(
+                uploadToS3(idCardFile.buffer, idCardKey, idCardFile.mimetype)
+                    .then(url => { fileUrls.idCardUrl = url; })
+                    .catch(error => {
+                        console.error('Error uploading ID card:', error);
+                        throw new Error('Failed to upload ID card');
+                    })
+            );
+        }
+
+        // Upload MUN Certificates (optional)
+        if (req.files.munCertificates) {
+            const certFile = req.files.munCertificates[0];
+            const certKey = `certificates/${uuidv4()}-${certFile.originalname}`;
+            uploadPromises.push(
+                uploadToS3(certFile.buffer, certKey, certFile.mimetype)
+                    .then(url => { fileUrls.munCertificatesUrl = url; })
+                    .catch(error => {
+                        console.error('Error uploading MUN certificates:', error);
+                        // Don't fail the entire submission for optional files
+                    })
+            );
+        }
+
+        // Upload Chairing Resume (optional)
+        if (req.files.chairingResume) {
+            const resumeFile = req.files.chairingResume[0];
+            const resumeKey = `resumes/${uuidv4()}-${resumeFile.originalname}`;
+            uploadPromises.push(
+                uploadToS3(resumeFile.buffer, resumeKey, resumeFile.mimetype)
+                    .then(url => { fileUrls.chairingResumeUrl = url; })
+                    .catch(error => {
+                        console.error('Error uploading chairing resume:', error);
+                        // Don't fail the entire submission for optional files
+                    })
+            );
+        }
+
+        // Wait for all file uploads to complete
+        await Promise.all(uploadPromises);
+
+        // Prepare data for Firestore
+        const formData = {
+            name: req.body.name,
+            email: req.body.email,
+            phone: req.body.phone,
+            college: req.body.college,
+            department: req.body.department,
       year: req.body.year,
-
-      // MUN experience
-      munsParticipated: parseInt(req.body.munsParticipated),
-      munsWithAwards: parseInt(req.body.munsWithAwards),
+            munsParticipated: parseInt(req.body.munsParticipated) || 0,
+            munsWithAwards: parseInt(req.body.munsWithAwards) || 0,
       organizingExperience: req.body.organizingExperience,
-      munsChaired: parseInt(req.body.munsChaired),
-
-      // Preferences
+            munsChaired: parseInt(req.body.munsChaired) || 0,
       committees: committees,
       positions: positions,
+            idCardUrl: fileUrls.idCardUrl,
+            munCertificatesUrl: fileUrls.munCertificatesUrl || null,
+            chairingResumeUrl: fileUrls.chairingResumeUrl || null,
+            submittedAt: new Date().toISOString()
+        };
 
-      // Metadata
-      submittedAt: new Date().toISOString(),
-      status: 'submitted',
-      ipAddress: req.ip,
-      userAgent: req.get('User-Agent')
-    };
+        console.log('Saving to Firestore:', formData);
 
-    // Create registration record first to get ID
-    const registrationId = await registrationHelpers.createRegistration(registrationData);
+        // Save to Firestore
+        const docRef = await addDocument('registrations', formData);
 
-    // Upload files to S3
-    let uploadedFiles = {};
-    try {
-      uploadedFiles = await registrationUploads.uploadRegistrationFiles(req.files, registrationId);
-    } catch (uploadError) {
-      // If file upload fails, delete the registration record
-      await registrationHelpers.deleteRegistration(registrationId);
-      
-      return res.status(400).json({
-        success: false,
-        message: uploadError.message
-      });
-    }
+        console.log('Document saved with ID:', docRef.id);
 
-    // Update registration with file URLs
-    await registrationHelpers.updateRegistration(registrationId, {
-      files: uploadedFiles
-    });
-
-    // Success response
-    res.status(201).json({
+        res.json({
       success: true,
-      message: 'Application submitted successfully',
+            message: 'Application submitted successfully!',
       data: {
-        registrationId: registrationId,
-        submittedAt: registrationData.submittedAt
+                id: docRef.id,
+                submittedAt: formData.submittedAt
       }
     });
-
-    // Log successful submission
-    console.log(`✅ New registration submitted: ${registrationData.name} (${registrationData.email})`);
 
   } catch (error) {
     console.error('Form submission error:', error);
-    
-    // Return appropriate error response
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({
-        success: false,
-        message: 'File size too large. Maximum allowed size is 3MB.'
-      });
-    }
-
-    if (error.code === 'LIMIT_FILE_COUNT') {
-      return res.status(400).json({
-        success: false,
-        message: 'Too many files uploaded.'
-      });
-    }
-
-    if (error.message.includes('Only PDF files are allowed')) {
-      return res.status(400).json({
-        success: false,
-        message: 'Only PDF files are allowed for uploads.'
-      });
-    }
 
     res.status(500).json({
       success: false,
-      message: 'An error occurred while processing your application. Please try again.'
+            message: error.message || 'Failed to submit application'
     });
   }
 });

@@ -5,99 +5,111 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 require('dotenv').config();
 
+// Import routes
 const formRoutes = require('./routes/formRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const mailerRoutes = require('./routes/mailerRoutes');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
 
 // Security middleware
-app.use(helmet());
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://cdnjs.cloudflare.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com", "https://cdnjs.cloudflare.com"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://cdnjs.cloudflare.com"],
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'"],
+            frameSrc: ["'none'"],
+            objectSrc: ["'none'"]
+        }
+    }
+}));
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: 'Too many requests from this IP, please try again later.'
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.'
 });
-app.use(limiter);
+app.use('/api/', limiter);
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://your-domain.com'] 
-    : ['http://localhost:3000', 'http://127.0.0.1:3000'],
-  credentials: true
+    origin: process.env.NODE_ENV === 'production' ? ['https://yourdomain.com'] : true,
+    credentials: true
 }));
 
-// Body parsing middleware
+// Body parsing middleware - IMPORTANT: Don't use body-parser for multipart forms
+// Only parse JSON and URL-encoded data, let multer handle multipart
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Serve static files from frontend
+// Serve static files from frontend directory
 app.use(express.static(path.join(__dirname, '../frontend')));
 
-// API Routes
-app.use('/api', formRoutes);
+// API routes
+app.use('/api/submit', formRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin', mailerRoutes);
 
+// Route for serving the landing page (default route)
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/landing.html'));
+});
+
+// Route for serving the application form
+app.get('/apply', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/index.html'));
+});
+
+// Route for serving the admin dashboard
+app.get('/admin', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/index.html'));
+});
+
 // Health check endpoint
-app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development'
-  });
+app.get('/health', (req, res) => {
+    res.json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime()
+    });
 });
 
-// Serve frontend for all other routes
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, '../frontend/index.html'));
+// Error handling middleware
+app.use((err, req, res, next) => {
+    console.error('Error:', err);
+    res.status(500).json({ 
+        success: false, 
+        message: 'Internal server error',
+        error: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong'
+    });
 });
 
-// Global error handler
-app.use((error, req, res, next) => {
-  console.error('Global error handler:', error);
-  
-  // Don't leak error details in production
-  const message = process.env.NODE_ENV === 'production' 
-    ? 'Internal server error' 
-    : error.message;
-    
-  res.status(error.status || 500).json({
-    success: false,
-    message: message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: error.stack })
-  });
+// 404 handler for API routes
+app.use('/api/*', (req, res) => {
+    res.status(404).json({ 
+        success: false, 
+        message: 'API endpoint not found' 
+    });
 });
 
-// Handle 404
-app.use((req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found'
-  });
+// 404 handler for all other routes - serve landing page
+app.use('*', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/landing.html'));
 });
 
-// Start server
+const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`📱 Frontend: http://localhost:${PORT}`);
-  console.log(`🔧 API: http://localhost:${PORT}/api`);
-  console.log(`🛡️  Environment: ${process.env.NODE_ENV || 'development'}`);
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
-  process.exit(0);
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`📱 Landing page: http://localhost:${PORT}`);
+    console.log(`📝 Application form: http://localhost:${PORT}/apply`);
+    console.log(`🔐 Admin dashboard: http://localhost:${PORT}/admin`);
+    console.log(`💚 Health check: http://localhost:${PORT}/health`);
 });
 
 module.exports = app;

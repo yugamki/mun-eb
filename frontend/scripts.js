@@ -2,10 +2,38 @@
 let currentRegistrations = [];
 let charts = {};
 
+// Check if Axios is available, if not, create a simple fallback
+if (typeof axios === 'undefined') {
+    console.warn('Axios not loaded, using fallback HTTP client');
+    window.axios = {
+        post: async (url, data, config) => {
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    body: data,
+                    headers: config?.headers || {}
+                });
+                const result = await response.json();
+                return { data: result };
+            } catch (error) {
+                throw { response: { data: { message: error.message } } };
+            }
+        },
+        get: async (url) => {
+            try {
+                const response = await fetch(url);
+                const result = await response.json();
+                return { data: result };
+            } catch (error) {
+                throw { response: { data: { message: error.message } } };
+            }
+        }
+    };
+}
+
 // DOM Elements
 const elements = {
     form: document.getElementById('ebForm'),
-    adminBtn: document.getElementById('adminBtn'),
     backToForm: document.getElementById('backToForm'),
     applicationForm: document.getElementById('applicationForm'),
     adminDashboard: document.getElementById('adminDashboard'),
@@ -22,22 +50,47 @@ const elements = {
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
+    console.log('Application initializing...');
+    console.log('Axios available:', typeof axios !== 'undefined');
+    
     initializeEventListeners();
     initializeFileUploads();
-    loadDashboardData();
+    handleRouting();
 });
+
+// Handle routing based on URL
+function handleRouting() {
+    const path = window.location.pathname;
+    
+    if (path === '/admin') {
+        showAdminDashboard();
+    } else if (path === '/apply') {
+        showApplicationForm();
+    } else {
+        // Default to landing page
+        window.location.href = '/';
+    }
+}
 
 // Event Listeners
 function initializeEventListeners() {
     // Form submission
+    if (elements.form) {
     elements.form.addEventListener('submit', handleFormSubmission);
+        console.log('Form submission listener added');
+    }
     
     // Navigation
-    elements.adminBtn.addEventListener('click', showAdminDashboard);
-    elements.backToForm.addEventListener('click', showApplicationForm);
+    if (elements.backToForm) {
+        elements.backToForm.addEventListener('click', () => {
+            window.location.href = '/apply';
+        });
+    }
     
     // Modal
+    if (elements.closeModal) {
     elements.closeModal.addEventListener('click', hideSuccessModal);
+    }
     
     // Dashboard tabs
     elements.tabBtns.forEach(btn => {
@@ -45,18 +98,27 @@ function initializeEventListeners() {
     });
     
     // Export functionality
+    if (elements.exportBtn) {
     elements.exportBtn.addEventListener('click', exportToExcel);
+    }
     
     // Mailer form
+    if (elements.mailerForm) {
     elements.mailerForm.addEventListener('submit', handleMailerSubmission);
+    }
     
     // Search functionality
+    if (elements.searchInput) {
     elements.searchInput.addEventListener('input', handleSearch);
+    }
     
     // File validation
     document.querySelectorAll('input[type="file"]').forEach(input => {
         input.addEventListener('change', validateFile);
     });
+    
+    // Handle browser back/forward buttons
+    window.addEventListener('popstate', handleRouting);
 }
 
 // File upload initialization
@@ -99,141 +161,288 @@ function initializeFileUploads() {
 
 // Update file display
 function updateFileDisplay(input, display) {
-    if (input.files.length > 0) {
+    if (input.files && input.files[0]) {
         const file = input.files[0];
-        display.innerHTML = `<i class="fas fa-file-pdf"></i> ${file.name}`;
+        display.textContent = file.name;
         display.style.color = 'var(--primary)';
+        display.style.fontWeight = '500';
+    } else {
+        display.textContent = input.required ? 'Choose file or drag here' : 'Choose file or drag here (Optional)';
+        display.style.color = 'var(--text-light)';
+        display.style.fontWeight = 'normal';
     }
 }
 
 // File validation
 function validateFile(event) {
-    const file = event.target.files[0];
+    const input = event.target;
+    const file = input.files[0];
+    
     if (!file) return;
     
-    const maxSizes = {
-        'idCard': 2 * 1024 * 1024, // 2MB
-        'munCertificates': 2 * 1024 * 1024, // 2MB
-        'chairingResume': 3 * 1024 * 1024 // 3MB
-    };
-    
-    const maxSize = maxSizes[event.target.name];
-    
+    // Check file type
     if (file.type !== 'application/pdf') {
-        showError('Please upload only PDF files.');
-        event.target.value = '';
-        return false;
+        showError('Only PDF files are allowed.');
+        input.value = '';
+        updateFileDisplay(input, input.parentElement.querySelector('.file-input-display span'));
+        return;
     }
     
+    // Check file size
+    const maxSize = input.id === 'chairingResume' ? 3 * 1024 * 1024 : 2 * 1024 * 1024; // 3MB or 2MB
     if (file.size > maxSize) {
         const maxSizeMB = maxSize / (1024 * 1024);
         showError(`File size must be less than ${maxSizeMB}MB.`);
-        event.target.value = '';
-        return false;
+        input.value = '';
+        updateFileDisplay(input, input.parentElement.querySelector('.file-input-display span'));
+        return;
     }
-    
-    return true;
 }
 
 // Form submission handler
 async function handleFormSubmission(event) {
     event.preventDefault();
-    
-    if (!validateForm()) {
-        return;
-    }
-    
-    showLoading();
+    console.log('Form submission started');
     
     try {
-        const formData = new FormData();
+    showLoading();
+    
+        // Get form data
+        const formData = new FormData(elements.form);
         
-        // Add form fields
-        const formFields = new FormData(elements.form);
-        for (let [key, value] of formFields.entries()) {
-            if (key === 'committees' || key === 'positions') {
-                // Handle multiple selections
-                const existing = formData.getAll(key);
-                if (!existing.includes(value)) {
-                    formData.append(key, value);
-                }
-            } else {
-                formData.set(key, value);
+        // Validate required fields
+        const requiredFields = ['name', 'email', 'phone', 'college', 'department', 'year'];
+        for (const field of requiredFields) {
+            if (!formData.get(field)) {
+                throw new Error(`Please fill in all required fields. Missing: ${field}`);
             }
         }
         
-        // Convert multi-select arrays to proper format
-        const committees = formData.getAll('committees');
-        const positions = formData.getAll('positions');
+        // Validate file uploads
+        if (!formData.get('idCard')) {
+            throw new Error('Please upload your ID Card.');
+        }
         
-        formData.delete('committees');
-        formData.delete('positions');
-        formData.append('committees', JSON.stringify(committees));
-        formData.append('positions', JSON.stringify(positions));
+        // Get checkbox values
+        const committees = Array.from(document.querySelectorAll('input[name="committees"]:checked')).map(cb => cb.value);
+        const positions = Array.from(document.querySelectorAll('input[name="positions"]:checked')).map(cb => cb.value);
         
+        if (committees.length === 0) {
+            throw new Error('Please select at least one committee preference.');
+        }
+        
+        if (positions.length === 0) {
+            throw new Error('Please select at least one position preference.');
+        }
+        
+        // Add checkbox values to form data
+        formData.set('committees', JSON.stringify(committees));
+        formData.set('positions', JSON.stringify(positions));
+        
+        console.log('Submitting form data...');
+        
+        // Submit form
         const response = await axios.post('/api/submit', formData, {
             headers: {
                 'Content-Type': 'multipart/form-data'
             }
         });
         
+        console.log('Form submission response:', response);
+        
+        if (response.data.success) {
         hideLoading();
         showSuccessModal();
         elements.form.reset();
+            
+            // Reset file displays
+            document.querySelectorAll('.file-input-display span').forEach(span => {
+                span.textContent = span.textContent.includes('Optional') ? 'Choose file or drag here (Optional)' : 'Choose file or drag here';
+                span.style.color = 'var(--text-light)';
+                span.style.fontWeight = 'normal';
+            });
+        } else {
+            throw new Error(response.data.message || 'Form submission failed.');
+        }
         
     } catch (error) {
         hideLoading();
-        console.error('Submission error:', error);
-        showError(error.response?.data?.message || 'An error occurred while submitting the form.');
+        console.error('Form submission error:', error);
+        
+        if (error.response) {
+            // Server error
+            showError(error.response.data.message || 'Server error occurred. Please try again.');
+        } else if (error.message) {
+            // Validation error
+            showError(error.message);
+        } else {
+            // Network error
+            showError('Network error. Please check your connection and try again.');
+        }
     }
 }
 
-// Form validation
-function validateForm() {
-    const requiredFields = [
-        'name', 'email', 'phone', 'college', 'department', 'year',
-        'munsParticipated', 'munsWithAwards', 'organizingExperience', 'munsChaired'
-    ];
-    
-    for (let field of requiredFields) {
-        const element = document.getElementById(field);
-        if (!element.value.trim()) {
-            showError(`Please fill in the ${field.replace(/([A-Z])/g, ' $1').toLowerCase()} field.`);
-            element.focus();
-            return false;
+// Load dashboard data
+async function loadDashboardData() {
+    try {
+        // Load statistics
+        const statsResponse = await axios.get('/api/admin/stats');
+        if (statsResponse.data.success) {
+            updateStatistics(statsResponse.data.data);
         }
+        
+        // Load registrations
+        const registrationsResponse = await axios.get('/api/admin/registrations');
+        if (registrationsResponse.data.success) {
+            currentRegistrations = registrationsResponse.data.data;
+            updateRegistrationsTable(currentRegistrations);
+        }
+        
+    } catch (error) {
+        console.error('Dashboard data loading error:', error);
+        // Use mock data for development
+        updateStatistics({
+            total: 0,
+            committeeStats: {},
+            positionStats: {},
+            yearStats: {},
+            recentSubmissions: []
+        });
+        updateRegistrationsTable([]);
+    }
+}
+
+// Update statistics
+function updateStatistics(stats) {
+    // Update total registrations
+    const totalElement = document.getElementById('totalRegistrations');
+    if (totalElement) {
+        totalElement.textContent = stats.total || 0;
     }
     
-    // Validate ID card upload
-    const idCard = document.getElementById('idCard');
-    if (!idCard.files.length) {
-        showError('Please upload your Aadhaar/ID Card.');
-        return false;
+    // Update charts
+    updateCharts(stats);
+}
+
+// Update charts
+function updateCharts(stats) {
+    // Committee chart
+    const committeeCtx = document.getElementById('committeeChart');
+    if (committeeCtx && stats.committeeStats) {
+    if (charts.committee) {
+        charts.committee.destroy();
     }
     
-    // Validate committee preferences
-    const committees = document.querySelectorAll('input[name="committees"]:checked');
-    if (committees.length === 0) {
-        showError('Please select at least one committee preference.');
-        return false;
+        const committeeData = {
+            labels: Object.keys(stats.committeeStats),
+            datasets: [{
+                label: 'Committee Preferences',
+                data: Object.values(stats.committeeStats),
+                backgroundColor: [
+                    '#172d9d',
+                    '#797dfa',
+                    '#37c9ee',
+                    '#10b981',
+                    '#f59e0b',
+                    '#ef4444'
+                ],
+                borderWidth: 0
+            }]
+        };
+        
+        charts.committee = new Chart(committeeCtx, {
+            type: 'doughnut',
+            data: committeeData,
+        options: {
+            responsive: true,
+                maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'bottom'
+                }
+            }
+        }
+    });
     }
     
-    // Validate position preferences
-    const positions = document.querySelectorAll('input[name="positions"]:checked');
-    if (positions.length === 0) {
-        showError('Please select at least one position preference.');
-        return false;
+    // Position chart
+    const positionCtx = document.getElementById('positionChart');
+    if (positionCtx && stats.positionStats) {
+    if (charts.position) {
+        charts.position.destroy();
     }
     
-    // Validate email format
-    const email = document.getElementById('email').value;
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(email)) {
-        showError('Please enter a valid email address.');
-        return false;
+        const positionData = {
+            labels: Object.keys(stats.positionStats),
+            datasets: [{
+                label: 'Position Preferences',
+                data: Object.values(stats.positionStats),
+                backgroundColor: [
+                    '#172d9d',
+                    '#797dfa',
+                    '#37c9ee'
+                ],
+                borderWidth: 0
+            }]
+        };
+        
+    charts.position = new Chart(positionCtx, {
+        type: 'bar',
+            data: positionData,
+        options: {
+            responsive: true,
+                maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                }
+            },
+            scales: {
+                y: {
+                    beginAtZero: true
+                }
+            }
+        }
+    });
+    }
+}
+
+// Update registrations table
+function updateRegistrationsTable(registrations) {
+    const tbody = document.querySelector('#registrationsTable tbody');
+    if (!tbody) return;
+    
+    tbody.innerHTML = '';
+    
+    if (registrations.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="8" class="text-center">No registrations found</td></tr>';
+        return;
     }
     
-    return true;
+    registrations.forEach(reg => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${reg.name || 'N/A'}</td>
+            <td>${reg.email || 'N/A'}</td>
+            <td>${reg.phone || 'N/A'}</td>
+            <td>${reg.year || 'N/A'}</td>
+            <td>${Array.isArray(reg.committees) ? reg.committees.join(', ') : 'N/A'}</td>
+            <td>${Array.isArray(reg.positions) ? reg.positions.join(', ') : 'N/A'}</td>
+            <td>${reg.submittedAt ? new Date(reg.submittedAt).toLocaleDateString() : 'N/A'}</td>
+            <td>
+                <button class="btn btn-outline" onclick="viewRegistration('${reg.id}')">
+                    <i class="fas fa-eye"></i>
+                </button>
+                <button class="btn btn-outline" onclick="editRegistration('${reg.id}')">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button class="btn btn-outline" onclick="deleteRegistration('${reg.id}')">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
 }
 
 // Navigation functions
@@ -250,158 +459,25 @@ function showApplicationForm() {
 
 // Tab switching
 function switchTab(tabName) {
+    // Remove active class from all tabs and contents
     elements.tabBtns.forEach(btn => btn.classList.remove('active'));
     elements.tabContents.forEach(content => content.classList.remove('active'));
     
+    // Add active class to selected tab and content
     document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
     document.getElementById(`${tabName}Tab`).classList.add('active');
-    
-    if (tabName === 'statistics') {
-        setTimeout(renderCharts, 100);
-    } else if (tabName === 'registrations') {
-        loadRegistrations();
-    } else if (tabName === 'mailer') {
-        loadMailerRecipients();
-    }
-}
-
-// Dashboard data loading
-async function loadDashboardData() {
-    try {
-        const response = await axios.get('/api/admin/stats');
-        const stats = response.data;
-        
-        document.getElementById('totalRegistrations').textContent = stats.total;
-        
-        // Store data for charts
-        window.dashboardStats = stats;
-        
-    } catch (error) {
-        console.error('Error loading dashboard data:', error);
-        showError('Failed to load dashboard data.');
-    }
-}
-
-// Chart rendering
-function renderCharts() {
-    if (!window.dashboardStats) return;
-    
-    const stats = window.dashboardStats;
-    
-    // Committee chart
-    if (charts.committee) {
-        charts.committee.destroy();
-    }
-    
-    const committeeCtx = document.getElementById('committeeChart').getContext('2d');
-    charts.committee = new Chart(committeeCtx, {
-        type: 'doughnut',
-        data: {
-            labels: Object.keys(stats.committees || {}),
-            datasets: [{
-                data: Object.values(stats.committees || {}),
-                backgroundColor: [
-                    '#172d9d',
-                    '#797dfa',
-                    '#37c9ee',
-                    '#10b981',
-                    '#f59e0b',
-                    '#ef4444'
-                ]
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    position: 'bottom'
-                }
-            }
-        }
-    });
-    
-    // Position chart
-    if (charts.position) {
-        charts.position.destroy();
-    }
-    
-    const positionCtx = document.getElementById('positionChart').getContext('2d');
-    charts.position = new Chart(positionCtx, {
-        type: 'bar',
-        data: {
-            labels: Object.keys(stats.positions || {}),
-            datasets: [{
-                label: 'Preferences',
-                data: Object.values(stats.positions || {}),
-                backgroundColor: '#797dfa'
-            }]
-        },
-        options: {
-            responsive: true,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true
-                }
-            }
-        }
-    });
-}
-
-// Load registrations
-async function loadRegistrations() {
-    try {
-        const response = await axios.get('/api/admin/registrations');
-        currentRegistrations = response.data;
-        renderRegistrationsTable(currentRegistrations);
-    } catch (error) {
-        console.error('Error loading registrations:', error);
-        showError('Failed to load registrations.');
-    }
-}
-
-// Render registrations table
-function renderRegistrationsTable(registrations) {
-    const tbody = document.querySelector('#registrationsTable tbody');
-    tbody.innerHTML = '';
-    
-    registrations.forEach(registration => {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${registration.name}</td>
-            <td>${registration.email}</td>
-            <td>${registration.phone}</td>
-            <td>${registration.year}</td>
-            <td>${Array.isArray(registration.committees) ? registration.committees.join(', ') : registration.committees}</td>
-            <td>${Array.isArray(registration.positions) ? registration.positions.join(', ') : registration.positions}</td>
-            <td>${new Date(registration.submittedAt).toLocaleDateString()}</td>
-            <td>
-                <button class="btn btn-outline" onclick="viewRegistration('${registration.id}')">
-                    <i class="fas fa-eye"></i>
-                </button>
-                <button class="btn btn-outline" onclick="deleteRegistration('${registration.id}')" style="color: #ef4444; border-color: #ef4444;">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </td>
-        `;
-        tbody.appendChild(row);
-    });
 }
 
 // Search functionality
 function handleSearch(event) {
     const searchTerm = event.target.value.toLowerCase();
-    const filtered = currentRegistrations.filter(registration => 
-        registration.name.toLowerCase().includes(searchTerm) ||
-        registration.email.toLowerCase().includes(searchTerm) ||
-        registration.phone.includes(searchTerm) ||
-        registration.college.toLowerCase().includes(searchTerm)
+    const filteredRegistrations = currentRegistrations.filter(reg => 
+        reg.name?.toLowerCase().includes(searchTerm) ||
+        reg.email?.toLowerCase().includes(searchTerm) ||
+        reg.phone?.includes(searchTerm) ||
+        reg.college?.toLowerCase().includes(searchTerm)
     );
-    renderRegistrationsTable(filtered);
+    updateRegistrationsTable(filteredRegistrations);
 }
 
 // Export to Excel
@@ -411,103 +487,57 @@ function exportToExcel() {
         return;
     }
     
+    try {
     const worksheet = XLSX.utils.json_to_sheet(currentRegistrations.map(reg => ({
-        Name: reg.name,
-        Email: reg.email,
-        Phone: reg.phone,
-        College: reg.college,
-        Department: reg.department,
-        Year: reg.year,
-        'MUNs Participated': reg.munsParticipated,
-        'MUNs with Awards': reg.munsWithAwards,
-        'Organizing Experience': reg.organizingExperience,
-        'MUNs Chaired': reg.munsChaired,
-        Committees: Array.isArray(reg.committees) ? reg.committees.join(', ') : reg.committees,
-        Positions: Array.isArray(reg.positions) ? reg.positions.join(', ') : reg.positions,
-        'Submitted At': new Date(reg.submittedAt).toLocaleString()
+            Name: reg.name || 'N/A',
+            Email: reg.email || 'N/A',
+            Phone: reg.phone || 'N/A',
+            College: reg.college || 'N/A',
+            Department: reg.department || 'N/A',
+            Year: reg.year || 'N/A',
+            'MUNs Participated': reg.munsParticipated || 'N/A',
+            'MUNs with Awards': reg.munsWithAwards || 'N/A',
+            'Organizing Experience': reg.organizingExperience || 'N/A',
+            'MUNs Chaired': reg.munsChaired || 'N/A',
+            Committees: Array.isArray(reg.committees) ? reg.committees.join(', ') : 'N/A',
+            Positions: Array.isArray(reg.positions) ? reg.positions.join(', ') : 'N/A',
+            'Submitted At': reg.submittedAt ? new Date(reg.submittedAt).toLocaleString() : 'N/A'
     })));
     
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Registrations');
     
-    XLSX.writeFile(workbook, `KMUN25_Registrations_${new Date().toISOString().split('T')[0]}.xlsx`);
-}
-
-// Load mailer recipients
-async function loadMailerRecipients() {
-    try {
-        const response = await axios.get('/api/admin/registrations');
-        const select = document.getElementById('recipients');
+        XLSX.writeFile(workbook, `Kumaraguru_MUN_Registrations_${new Date().toISOString().split('T')[0]}.xlsx`);
         
-        // Clear existing options except "All Registrants"
-        select.innerHTML = '<option value="all">All Registrants</option>';
-        
-        response.data.forEach(registration => {
-            const option = document.createElement('option');
-            option.value = registration.email;
-            option.textContent = `${registration.name} (${registration.email})`;
-            select.appendChild(option);
-        });
-        
+        showSuccess('Data exported successfully!');
     } catch (error) {
-        console.error('Error loading recipients:', error);
-        showError('Failed to load recipients.');
+        console.error('Export error:', error);
+        showError('Failed to export data.');
     }
 }
 
-// Handle mailer submission
+// Mailer submission
 async function handleMailerSubmission(event) {
     event.preventDefault();
     
+    try {
     showLoading();
     
-    try {
-        const formData = new FormData(event.target);
-        const recipients = Array.from(document.getElementById('recipients').selectedOptions)
-            .map(option => option.value);
+        const formData = new FormData(elements.mailerForm);
+        const response = await axios.post('/api/admin/send-mail', formData);
         
-        const mailData = {
-            recipients: recipients,
-            subject: formData.get('subject'),
-            message: formData.get('message')
-        };
-        
-        await axios.post('/api/admin/send-mail', mailData);
-        
-        hideLoading();
-        showSuccess('Emails sent successfully!');
-        event.target.reset();
+        if (response.data.success) {
+            showSuccess('Email sent successfully!');
+            elements.mailerForm.reset();
+        } else {
+            throw new Error(response.data.message || 'Failed to send email.');
+        }
         
     } catch (error) {
-        hideLoading();
         console.error('Mailer error:', error);
-        showError(error.response?.data?.message || 'Failed to send emails.');
-    }
-}
-
-// View registration details
-function viewRegistration(id) {
-    const registration = currentRegistrations.find(r => r.id === id);
-    if (!registration) return;
-    
-    // Create a modal or detailed view
-    alert(`Registration Details:\n\nName: ${registration.name}\nEmail: ${registration.email}\nPhone: ${registration.phone}\nCollege: ${registration.college}\nDepartment: ${registration.department}\nYear: ${registration.year}\nCommittees: ${Array.isArray(registration.committees) ? registration.committees.join(', ') : registration.committees}\nPositions: ${Array.isArray(registration.positions) ? registration.positions.join(', ') : registration.positions}`);
-}
-
-// Delete registration
-async function deleteRegistration(id) {
-    if (!confirm('Are you sure you want to delete this registration?')) {
-        return;
-    }
-    
-    try {
-        await axios.delete(`/api/admin/registrations/${id}`);
-        showSuccess('Registration deleted successfully!');
-        loadRegistrations();
-        loadDashboardData();
-    } catch (error) {
-        console.error('Delete error:', error);
-        showError('Failed to delete registration.');
+        showError(error.response?.data?.message || 'Failed to send email.');
+    } finally {
+        hideLoading();
     }
 }
 
@@ -528,10 +558,61 @@ function hideSuccessModal() {
     elements.successModal.style.display = 'none';
 }
 
-function showError(message) {
-    alert('Error: ' + message);
+function showSuccess(message) {
+    // Create a simple success notification
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #10b981;
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 8px;
+        z-index: 1001;
+        animation: slideIn 0.3s ease-out;
+    `;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
 }
 
-function showSuccess(message) {
-    alert('Success: ' + message);
+function showError(message) {
+    // Create a simple error notification
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        background: #ef4444;
+        color: white;
+        padding: 1rem 2rem;
+        border-radius: 8px;
+        z-index: 1001;
+        animation: slideIn 0.3s ease-out;
+    `;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 5000);
+}
+
+// Admin functions (placeholder implementations)
+function viewRegistration(id) {
+    showSuccess(`Viewing registration ${id}`);
+}
+
+function editRegistration(id) {
+    showSuccess(`Editing registration ${id}`);
+}
+
+function deleteRegistration(id) {
+    if (confirm('Are you sure you want to delete this registration?')) {
+        showSuccess(`Deleting registration ${id}`);
+    }
 }
