@@ -31,7 +31,7 @@ if (typeof axios === 'undefined') {
     };
 }
 
-// DOM Elements
+// DOM Elements - with null checks for different pages
 const elements = {
     form: document.getElementById('ebForm'),
     backToForm: document.getElementById('backToForm'),
@@ -45,7 +45,10 @@ const elements = {
     submitBtn: document.getElementById('submitBtn'),
     exportBtn: document.getElementById('exportBtn'),
     mailerForm: document.getElementById('mailerForm'),
-    searchInput: document.getElementById('searchInput')
+    searchInput: document.getElementById('searchInput'),
+    committeeFilter: document.getElementById('committeeFilter'),
+    positionFilter: document.getElementById('positionFilter'),
+    previewBtn: document.getElementById('previewBtn')
 };
 
 // Initialize application
@@ -55,7 +58,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     initializeEventListeners();
     initializeFileUploads();
-    handleRouting();
+    initializePage();
 });
 
 // Handle routing based on URL
@@ -63,12 +66,16 @@ function handleRouting() {
     const path = window.location.pathname;
     
     if (path === '/admin') {
-        showAdminDashboard();
-    } else if (path === '/apply') {
-        showApplicationForm();
+        // Admin page - load dashboard data
+        if (elements.adminDashboard) {
+            loadDashboardData();
+        }
+    } else if (path === '/form') {
+        // Form page - no special handling needed
+        console.log('Application form page loaded');
     } else {
-        // Default to landing page
-        window.location.href = '/';
+        // Landing page - no special handling needed
+        console.log('Landing page loaded');
     }
 }
 
@@ -76,46 +83,64 @@ function handleRouting() {
 function initializeEventListeners() {
     // Form submission
     if (elements.form) {
-    elements.form.addEventListener('submit', handleFormSubmission);
+        elements.form.addEventListener('submit', handleFormSubmission);
         console.log('Form submission listener added');
     }
     
-    // Navigation
+    // Navigation - only add if element exists (for admin page)
     if (elements.backToForm) {
         elements.backToForm.addEventListener('click', () => {
-            window.location.href = '/apply';
+            window.location.href = '/form';
         });
     }
     
     // Modal
     if (elements.closeModal) {
-    elements.closeModal.addEventListener('click', hideSuccessModal);
+        elements.closeModal.addEventListener('click', hideSuccessModal);
     }
     
-    // Dashboard tabs
-    elements.tabBtns.forEach(btn => {
-        btn.addEventListener('click', () => switchTab(btn.dataset.tab));
-    });
+    // Dashboard tabs - only add if elements exist (for admin page)
+    if (elements.tabBtns.length > 0) {
+        elements.tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => switchTab(btn.dataset.tab));
+        });
+    }
     
-    // Export functionality
+    // Export functionality - only add if element exists (for admin page)
     if (elements.exportBtn) {
-    elements.exportBtn.addEventListener('click', exportToExcel);
+        elements.exportBtn.addEventListener('click', exportToExcel);
     }
     
-    // Mailer form
+    // Mailer form - only add if element exists (for admin page)
     if (elements.mailerForm) {
-    elements.mailerForm.addEventListener('submit', handleMailerSubmission);
+        elements.mailerForm.addEventListener('submit', handleMailerSubmission);
     }
     
-    // Search functionality
+    // Search functionality - only add if element exists (for admin page)
     if (elements.searchInput) {
-    elements.searchInput.addEventListener('input', handleSearch);
+        elements.searchInput.addEventListener('input', handleSearch);
     }
     
-    // File validation
-    document.querySelectorAll('input[type="file"]').forEach(input => {
-        input.addEventListener('change', validateFile);
-    });
+    // Filter functionality - only add if elements exist (for admin page)
+    if (elements.committeeFilter) {
+        elements.committeeFilter.addEventListener('change', handleFilter);
+    }
+    if (elements.positionFilter) {
+        elements.positionFilter.addEventListener('change', handleFilter);
+    }
+    
+    // Preview functionality - only add if element exists (for admin page)
+    if (elements.previewBtn) {
+        elements.previewBtn.addEventListener('click', handlePreview);
+    }
+    
+    // File validation - only add if file inputs exist (for form page)
+    const fileInputs = document.querySelectorAll('input[type="file"]');
+    if (fileInputs.length > 0) {
+        fileInputs.forEach(input => {
+            input.addEventListener('change', validateFile);
+        });
+    }
     
     // Handle browser back/forward buttons
     window.addEventListener('popstate', handleRouting);
@@ -123,9 +148,20 @@ function initializeEventListeners() {
 
 // File upload initialization
 function initializeFileUploads() {
-    document.querySelectorAll('.file-input-wrapper').forEach(wrapper => {
+    const fileWrappers = document.querySelectorAll('.file-input-wrapper');
+    if (fileWrappers.length === 0) {
+        console.log('No file upload elements found on this page');
+        return;
+    }
+    
+    fileWrappers.forEach(wrapper => {
         const input = wrapper.querySelector('input[type="file"]');
         const display = wrapper.querySelector('.file-input-display span');
+        
+        if (!input || !display) {
+            console.warn('File upload wrapper missing required elements');
+            return;
+        }
         
         // Drag and drop functionality
         wrapper.addEventListener('dragover', (e) => {
@@ -445,16 +481,19 @@ function updateRegistrationsTable(registrations) {
     });
 }
 
-// Navigation functions
-function showAdminDashboard() {
-    elements.applicationForm.style.display = 'none';
-    elements.adminDashboard.style.display = 'block';
-    loadDashboardData();
-}
-
-function showApplicationForm() {
-    elements.adminDashboard.style.display = 'none';
-    elements.applicationForm.style.display = 'block';
+// Page-specific initialization
+function initializePage() {
+    const path = window.location.pathname;
+    
+    if (path === '/admin') {
+        // Admin page specific initialization
+        if (elements.adminDashboard) {
+            loadDashboardData();
+        }
+    } else if (path === '/form') {
+        // Form page specific initialization
+        console.log('Application form initialized');
+    }
 }
 
 // Tab switching
@@ -478,6 +517,42 @@ function handleSearch(event) {
         reg.college?.toLowerCase().includes(searchTerm)
     );
     updateRegistrationsTable(filteredRegistrations);
+}
+
+// Filter functionality
+function handleFilter() {
+    const committeeFilter = elements.committeeFilter?.value || '';
+    const positionFilter = elements.positionFilter?.value || '';
+    
+    let filteredRegistrations = currentRegistrations;
+    
+    if (committeeFilter) {
+        filteredRegistrations = filteredRegistrations.filter(reg => 
+            Array.isArray(reg.committees) && reg.committees.includes(committeeFilter)
+        );
+    }
+    
+    if (positionFilter) {
+        filteredRegistrations = filteredRegistrations.filter(reg => 
+            Array.isArray(reg.positions) && reg.positions.includes(positionFilter)
+        );
+    }
+    
+    updateRegistrationsTable(filteredRegistrations);
+}
+
+// Preview functionality
+function handlePreview() {
+    const subject = elements.mailerForm?.querySelector('#subject')?.value || '';
+    const message = elements.mailerForm?.querySelector('#message')?.value || '';
+    
+    if (!subject || !message) {
+        showError('Please fill in both subject and message before previewing.');
+        return;
+    }
+    
+    const previewText = `Subject: ${subject}\n\nMessage:\n${message}`;
+    alert(previewText);
 }
 
 // Export to Excel

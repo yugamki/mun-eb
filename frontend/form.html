@@ -231,114 +231,6 @@
                     </div>
                 </form>
             </div>
-
-            <!-- Admin Dashboard -->
-            <div id="adminDashboard" class="admin-dashboard" style="display: none;">
-                <div class="dashboard-header">
-                    <h2>Admin Dashboard</h2>
-                    <button id="backToForm" class="btn btn-outline">
-                        <i class="fas fa-arrow-left"></i>
-                        Back to Form
-                    </button>
-                </div>
-
-                <div class="dashboard-tabs">
-                    <button class="tab-btn active" data-tab="statistics">
-                        <i class="fas fa-chart-bar"></i>
-                        Statistics
-                    </button>
-                    <button class="tab-btn" data-tab="registrations">
-                        <i class="fas fa-users"></i>
-                        Registrations
-                    </button>
-                    <button class="tab-btn" data-tab="mailer">
-                        <i class="fas fa-envelope"></i>
-                        Mailer
-                    </button>
-                </div>
-
-                <!-- Statistics Tab -->
-                <div id="statisticsTab" class="tab-content active">
-                    <div class="stats-grid">
-                        <div class="stat-card">
-                            <div class="stat-icon">
-                                <i class="fas fa-users"></i>
-                            </div>
-                            <div class="stat-info">
-                                <h3 id="totalRegistrations">0</h3>
-                                <p>Total Registrations</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="charts-container">
-                        <div class="chart-card">
-                            <h4>Committee Preferences</h4>
-                            <canvas id="committeeChart"></canvas>
-                        </div>
-                        <div class="chart-card">
-                            <h4>Position Preferences</h4>
-                            <canvas id="positionChart"></canvas>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Registrations Tab -->
-                <div id="registrationsTab" class="tab-content">
-                    <div class="table-controls">
-                        <div class="search-box">
-                            <i class="fas fa-search"></i>
-                            <input type="text" id="searchInput" placeholder="Search registrations...">
-                        </div>
-                        <button id="exportBtn" class="btn btn-primary">
-                            <i class="fas fa-download"></i>
-                            Export Excel
-                        </button>
-                    </div>
-                    <div class="table-container">
-                        <table id="registrationsTable">
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Email</th>
-                                    <th>Phone</th>
-                                    <th>Year</th>
-                                    <th>Committees</th>
-                                    <th>Positions</th>
-                                    <th>Submitted</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody></tbody>
-                        </table>
-                    </div>
-                </div>
-
-                <!-- Mailer Tab -->
-                <div id="mailerTab" class="tab-content">
-                    <form id="mailerForm" class="mailer-form">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="recipients">Recipients</label>
-                                <select id="recipients" name="recipients" multiple>
-                                    <option value="all">All Registrants</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="subject">Subject</label>
-                                <input type="text" id="subject" name="subject" required>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <label for="message">Message</label>
-                            <textarea id="message" name="message" rows="10" required></textarea>
-                        </div>
-                        <button type="submit" class="btn btn-primary">
-                            <i class="fas fa-paper-plane"></i>
-                            Send Email
-                        </button>
-                    </form>
-                </div>
-            </div>
         </main>
     </div>
 
@@ -368,8 +260,6 @@
 
     <!-- Load external libraries -->
     <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
     <!-- Load our scripts after external libraries -->
     <script src="scripts.js"></script>

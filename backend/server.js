@@ -57,17 +57,17 @@ app.use('/api/admin', mailerRoutes);
 
 // Route for serving the landing page (default route)
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/landing.html'));
+    res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
 // Route for serving the application form
-app.get('/apply', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/index.html'));
+app.get('/form', (req, res) => {
+    res.sendFile(path.join(__dirname, '../frontend/form.html'));
 });
 
 // Route for serving the admin dashboard
 app.get('/admin', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/index.html'));
+    res.sendFile(path.join(__dirname, '../frontend/admin.html'));
 });
 
 // Health check endpoint
@@ -99,7 +99,7 @@ app.use('/api/*', (req, res) => {
 
 // 404 handler for all other routes - serve landing page
 app.use('*', (req, res) => {
-    res.sendFile(path.join(__dirname, '../frontend/landing.html'));
+    res.sendFile(path.join(__dirname, '../frontend/index.html'));
 });
 
 const PORT = process.env.PORT || 3000;
@@ -107,7 +107,7 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📱 Landing page: http://localhost:${PORT}`);
-    console.log(`📝 Application form: http://localhost:${PORT}/apply`);
+    console.log(`📝 Application form: http://localhost:${PORT}/form`);
     console.log(`🔐 Admin dashboard: http://localhost:${PORT}/admin`);
     console.log(`💚 Health check: http://localhost:${PORT}/health`);
 });
