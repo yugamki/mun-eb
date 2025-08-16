@@ -1,6 +1,6 @@
 // Global variables
 let currentRegistrations = [];
-let charts = {};
+let dashboardLoaded = false;
 
 // Check if Axios is available, if not, create a simple fallback
 if (typeof axios === 'undefined') {
@@ -56,6 +56,13 @@ document.addEventListener('DOMContentLoaded', function() {
     console.log('Application initializing...');
     console.log('Axios available:', typeof axios !== 'undefined');
     
+    // Prevent multiple initializations
+    if (window.appInitialized) {
+        console.log('Application already initialized, skipping...');
+        return;
+    }
+    window.appInitialized = true;
+    
     initializeEventListeners();
     initializeFileUploads();
     initializePage();
@@ -64,10 +71,12 @@ document.addEventListener('DOMContentLoaded', function() {
 // Handle routing based on URL
 function handleRouting() {
     const path = window.location.pathname;
+    console.log('Routing to path:', path);
     
     if (path === '/admin') {
         // Admin page - load dashboard data
-        if (elements.adminDashboard) {
+        if (elements.adminDashboard && !dashboardLoaded) {
+            console.log('Loading dashboard data from routing...');
             loadDashboardData();
         }
     } else if (path === '/form') {
@@ -99,6 +108,21 @@ function initializeEventListeners() {
         elements.closeModal.addEventListener('click', hideSuccessModal);
     }
     
+    // Email Preview Modal
+    const closeEmailPreview = document.getElementById('closeEmailPreview');
+    const closePreviewModal = document.getElementById('closePreviewModal');
+    const sendFromPreview = document.getElementById('sendFromPreview');
+    
+    if (closeEmailPreview) {
+        closeEmailPreview.addEventListener('click', hideEmailPreviewModal);
+    }
+    if (closePreviewModal) {
+        closePreviewModal.addEventListener('click', hideEmailPreviewModal);
+    }
+    if (sendFromPreview) {
+        sendFromPreview.addEventListener('click', sendEmailFromPreview);
+    }
+    
     // Dashboard tabs - only add if elements exist (for admin page)
     if (elements.tabBtns.length > 0) {
         elements.tabBtns.forEach(btn => {
@@ -114,6 +138,12 @@ function initializeEventListeners() {
     // Mailer form - only add if element exists (for admin page)
     if (elements.mailerForm) {
         elements.mailerForm.addEventListener('submit', handleMailerSubmission);
+        
+        // Add mailer tab functionality
+        const mailerTabBtns = document.querySelectorAll('.mailer-tab-btn');
+        mailerTabBtns.forEach(btn => {
+            btn.addEventListener('click', handleMailerTabChange);
+        });
     }
     
     // Search functionality - only add if element exists (for admin page)
@@ -320,6 +350,16 @@ async function handleFormSubmission(event) {
 
 // Load dashboard data
 async function loadDashboardData() {
+    // Prevent multiple loads
+    if (dashboardLoaded) {
+        console.log('Dashboard already loaded, skipping...');
+        return;
+    }
+    
+    // Set loading flag immediately to prevent concurrent calls
+    dashboardLoaded = true;
+    console.log('Loading dashboard data...', new Date().toISOString());
+    
     try {
         // Load statistics
         const statsResponse = await axios.get('/api/admin/stats');
@@ -334,14 +374,33 @@ async function loadDashboardData() {
             updateRegistrationsTable(currentRegistrations);
         }
         
+        console.log('Dashboard data loaded successfully');
+        
     } catch (error) {
         console.error('Dashboard data loading error:', error);
         // Use mock data for development
         updateStatistics({
             total: 0,
-            committeeStats: {},
-            positionStats: {},
-            yearStats: {},
+            committeeStats: {
+                'UNSC': 0,
+                'UNODC': 0,
+                'LOK SABHA': 0,
+                'CCC': 0,
+                'IPC': 0,
+                'DISEC': 0
+            },
+            positionStats: {
+                'Chairperson': 0,
+                'Vice-Chairperson': 0,
+                'Director': 0
+            },
+            yearStats: {
+                '1': 0,
+                '2': 0,
+                '3': 0,
+                '4': 0,
+                '5': 0
+            },
             recentSubmissions: []
         });
         updateRegistrationsTable([]);
@@ -350,98 +409,43 @@ async function loadDashboardData() {
 
 // Update statistics
 function updateStatistics(stats) {
+    // Prevent multiple calls
+    if (!stats || typeof stats !== 'object') {
+        console.warn('Invalid stats data provided to updateStatistics');
+        return;
+    }
+    
     // Update total registrations
     const totalElement = document.getElementById('totalRegistrations');
     if (totalElement) {
         totalElement.textContent = stats.total || 0;
     }
     
-    // Update charts
-    updateCharts(stats);
+    // Update today's registrations
+    const todayElement = document.getElementById('todayRegistrations');
+    if (todayElement) {
+        const today = new Date().toDateString();
+        const todayCount = stats.recentSubmissions ? 
+            stats.recentSubmissions.filter(sub => 
+                new Date(sub.submittedAt).toDateString() === today
+            ).length : 0;
+        todayElement.textContent = todayCount;
+    }
+    
+    // Update weekly registrations
+    const weeklyElement = document.getElementById('weeklyRegistrations');
+    if (weeklyElement) {
+        const weekAgo = new Date();
+        weekAgo.setDate(weekAgo.getDate() - 7);
+        const weeklyCount = stats.recentSubmissions ? 
+            stats.recentSubmissions.filter(sub => 
+                new Date(sub.submittedAt) >= weekAgo
+            ).length : 0;
+        weeklyElement.textContent = weeklyCount;
+    }
 }
 
-// Update charts
-function updateCharts(stats) {
-    // Committee chart
-    const committeeCtx = document.getElementById('committeeChart');
-    if (committeeCtx && stats.committeeStats) {
-    if (charts.committee) {
-        charts.committee.destroy();
-    }
-    
-        const committeeData = {
-            labels: Object.keys(stats.committeeStats),
-            datasets: [{
-                label: 'Committee Preferences',
-                data: Object.values(stats.committeeStats),
-                backgroundColor: [
-                    '#172d9d',
-                    '#797dfa',
-                    '#37c9ee',
-                    '#10b981',
-                    '#f59e0b',
-                    '#ef4444'
-                ],
-                borderWidth: 0
-            }]
-        };
-        
-        charts.committee = new Chart(committeeCtx, {
-            type: 'doughnut',
-            data: committeeData,
-        options: {
-            responsive: true,
-                maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'bottom'
-                }
-            }
-        }
-    });
-    }
-    
-    // Position chart
-    const positionCtx = document.getElementById('positionChart');
-    if (positionCtx && stats.positionStats) {
-    if (charts.position) {
-        charts.position.destroy();
-    }
-    
-        const positionData = {
-            labels: Object.keys(stats.positionStats),
-            datasets: [{
-                label: 'Position Preferences',
-                data: Object.values(stats.positionStats),
-                backgroundColor: [
-                    '#172d9d',
-                    '#797dfa',
-                    '#37c9ee'
-                ],
-                borderWidth: 0
-            }]
-        };
-        
-    charts.position = new Chart(positionCtx, {
-        type: 'bar',
-            data: positionData,
-        options: {
-            responsive: true,
-                maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    display: false
-                }
-            },
-            scales: {
-                y: {
-                    beginAtZero: true
-                }
-            }
-        }
-    });
-    }
-}
+
 
 // Update registrations table
 function updateRegistrationsTable(registrations) {
@@ -484,11 +488,20 @@ function updateRegistrationsTable(registrations) {
 // Page-specific initialization
 function initializePage() {
     const path = window.location.pathname;
+    console.log('Initializing page for path:', path);
     
     if (path === '/admin') {
         // Admin page specific initialization
-        if (elements.adminDashboard) {
-            loadDashboardData();
+        if (elements.adminDashboard && !dashboardLoaded) {
+            console.log('Admin dashboard found, loading data...');
+            // Add a small delay to ensure DOM is fully ready
+            setTimeout(() => {
+                if (!dashboardLoaded) {
+                    loadDashboardData();
+                }
+            }, 100);
+        } else {
+            console.log('Admin dashboard element not found or already loaded');
         }
     } else if (path === '/form') {
         // Form page specific initialization
@@ -541,18 +554,151 @@ function handleFilter() {
     updateRegistrationsTable(filteredRegistrations);
 }
 
+// Handle mailer tab change
+function handleMailerTabChange(event) {
+    const clickedTab = event.currentTarget;
+    const recipientType = clickedTab.dataset.recipientType;
+    
+    // Update active tab
+    document.querySelectorAll('.mailer-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    clickedTab.classList.add('active');
+    
+    // Show/hide appropriate sections
+    const recipientsGroup = document.getElementById('recipientsGroup');
+    const singleEmailGroup = document.getElementById('singleEmailGroup');
+    
+    if (recipientType === 'single') {
+        recipientsGroup.style.display = 'none';
+        singleEmailGroup.style.display = 'block';
+    } else {
+        recipientsGroup.style.display = 'block';
+        singleEmailGroup.style.display = 'none';
+    }
+}
+
 // Preview functionality
 function handlePreview() {
     const subject = elements.mailerForm?.querySelector('#subject')?.value || '';
     const message = elements.mailerForm?.querySelector('#message')?.value || '';
+    const activeTab = document.querySelector('.mailer-tab-btn.active');
+    const recipientType = activeTab?.dataset.recipientType;
     
     if (!subject || !message) {
         showError('Please fill in both subject and message before previewing.');
         return;
     }
     
-    const previewText = `Subject: ${subject}\n\nMessage:\n${message}`;
-    alert(previewText);
+    // Determine recipients
+    let recipients = '';
+    if (recipientType === 'single') {
+        const singleEmail = document.getElementById('singleEmail')?.value || '';
+        if (!singleEmail) {
+            showError('Please enter an email address for single recipient.');
+            return;
+        }
+        recipients = singleEmail;
+    } else {
+        const selectedRecipients = Array.from(document.querySelectorAll('#recipients option:checked')).map(opt => opt.text);
+        if (selectedRecipients.length === 0) {
+            showError('Please select at least one recipient group.');
+            return;
+        }
+        recipients = selectedRecipients.join(', ');
+    }
+    
+    // Show email preview modal
+    showEmailPreviewModal(subject, message, recipients);
+}
+
+// Show email preview modal
+function showEmailPreviewModal(subject, message, recipients) {
+    const modal = document.getElementById('emailPreviewModal');
+    const previewSubject = document.getElementById('previewSubject');
+    const previewTo = document.getElementById('previewTo');
+    const previewBody = document.getElementById('previewBody');
+    
+    previewSubject.textContent = subject;
+    previewTo.textContent = recipients;
+    
+    // Create email HTML content
+    const emailHtml = `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background: linear-gradient(135deg, #172d9d 0%, #797dfa 100%); color: white; padding: 30px; text-align: center;">
+                <h1 style="margin: 0; font-size: 28px;">KMUN'25</h1>
+                <p style="margin: 10px 0 0 0; font-size: 16px;">Executive Board Recruitment</p>
+            </div>
+            <div style="padding: 30px; background: #ffffff;">
+                ${message.replace(/\n/g, '<br>')}
+            </div>
+        </div>
+    `;
+    
+    previewBody.innerHTML = emailHtml;
+    modal.style.display = 'flex';
+}
+
+// Hide email preview modal
+function hideEmailPreviewModal() {
+    const modal = document.getElementById('emailPreviewModal');
+    modal.style.display = 'none';
+}
+
+// Send email from preview
+async function sendEmailFromPreview() {
+    try {
+        showLoading();
+        
+        // Create request data object (same as handleMailerSubmission)
+        const requestData = {};
+        
+        const activeTab = document.querySelector('.mailer-tab-btn.active');
+        const recipientType = activeTab?.dataset.recipientType;
+        const emailProvider = document.getElementById('emailProvider')?.value;
+        const subject = document.getElementById('subject')?.value;
+        const message = document.getElementById('message')?.value;
+        
+        // Handle recipients based on type
+        if (recipientType === 'single') {
+            const singleEmail = document.getElementById('singleEmail')?.value;
+            requestData.recipients = singleEmail;
+        } else {
+            const selectedRecipients = Array.from(document.querySelectorAll('#recipients option:checked')).map(opt => opt.value);
+            requestData.recipients = selectedRecipients;
+        }
+        
+        // Add other form data
+        requestData.subject = subject;
+        requestData.message = message;
+        requestData.smtpProvider = emailProvider;
+        
+        const response = await axios.post('/api/admin/send-mail', requestData, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.data.success) {
+            showSuccess('Email sent successfully!');
+            elements.mailerForm.reset();
+            hideEmailPreviewModal();
+            
+            // Reset to first tab
+            const firstTab = document.querySelector('.mailer-tab-btn');
+            if (firstTab) {
+                firstTab.click();
+            }
+        } else {
+            throw new Error(response.data.message || 'Failed to send email.');
+        }
+        
+    } catch (error) {
+        console.error('Mailer error:', error);
+        showError(error.response?.data?.message || 'Failed to send email.');
+    } finally {
+        hideLoading();
+    }
 }
 
 // Export to Excel
@@ -596,14 +742,70 @@ async function handleMailerSubmission(event) {
     event.preventDefault();
     
     try {
-    showLoading();
-    
-        const formData = new FormData(elements.mailerForm);
-        const response = await axios.post('/api/admin/send-mail', formData);
+        showLoading();
+        
+        // Create request data object
+        const requestData = {};
+        
+        // Get form data
+        const activeTab = document.querySelector('.mailer-tab-btn.active');
+        const recipientType = activeTab?.dataset.recipientType;
+        const emailProvider = document.getElementById('emailProvider')?.value;
+        const subject = document.getElementById('subject')?.value;
+        const message = document.getElementById('message')?.value;
+        
+        // Validate required fields
+        if (!subject || !message) {
+            showError('Please fill in both subject and message.');
+            return;
+        }
+        
+        // Handle recipients based on type
+        if (recipientType === 'single') {
+            const singleEmail = document.getElementById('singleEmail')?.value;
+            if (!singleEmail) {
+                showError('Please enter an email address for single recipient.');
+                return;
+            }
+            requestData.recipients = singleEmail;
+        } else {
+            const selectedRecipients = Array.from(document.querySelectorAll('#recipients option:checked')).map(opt => opt.value);
+            if (selectedRecipients.length === 0) {
+                showError('Please select at least one recipient group.');
+                return;
+            }
+            requestData.recipients = selectedRecipients;
+        }
+        
+        // Add other form data
+        requestData.subject = subject;
+        requestData.message = message;
+        requestData.smtpProvider = emailProvider;
+        
+        // Debug logging
+        console.log('Sending mail request:', {
+            recipientType,
+            recipients: recipientType === 'single' ? document.getElementById('singleEmail')?.value : Array.from(document.querySelectorAll('#recipients option:checked')).map(opt => opt.value),
+            emailProvider,
+            subject,
+            message: message ? 'Message provided' : 'No message'
+        });
+        
+        const response = await axios.post('/api/admin/send-mail', requestData, {
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
         
         if (response.data.success) {
             showSuccess('Email sent successfully!');
             elements.mailerForm.reset();
+            
+            // Reset to first tab
+            const firstTab = document.querySelector('.mailer-tab-btn');
+            if (firstTab) {
+                firstTab.click();
+            }
         } else {
             throw new Error(response.data.message || 'Failed to send email.');
         }
@@ -676,6 +878,8 @@ function showError(message) {
         notification.remove();
     }, 5000);
 }
+
+
 
 // Admin functions (placeholder implementations)
 function viewRegistration(id) {

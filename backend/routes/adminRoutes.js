@@ -1,31 +1,46 @@
 const express = require('express');
-const { registrationHelpers } = require('../utils/firebase');
-const { registrationUploads } = require('../utils/s3Uploader');
+const { 
+  getRegistrationStats, 
+  getCollection, 
+  getDocument, 
+  updateDocument, 
+  deleteDocument,
+  COLLECTIONS 
+} = require('../utils/firebase');
+const { deleteFromS3, getKeyFromUrl } = require('../utils/s3Uploader');
 
 const router = express.Router();
 
-// Middleware for admin authentication (simplified for demo)
+// Helper function to delete registration files
+async function deleteRegistrationFiles(files) {
+  if (!files || typeof files !== 'object') return;
+  
+  const deletePromises = Object.values(files).map(async (fileUrl) => {
+    if (typeof fileUrl === 'string') {
+      const key = getKeyFromUrl(fileUrl);
+      if (key) {
+        try {
+          await deleteFromS3(key);
+        } catch (error) {
+          console.error('Error deleting file:', error);
+        }
+      }
+    }
+  });
+  
+  await Promise.all(deletePromises);
+}
+
+// Middleware for admin authentication - removed as requested
 const authenticateAdmin = (req, res, next) => {
-  // In production, implement proper JWT/session authentication
-  // For now, we'll use a simple API key approach
-  const apiKey = req.headers['x-api-key'] || req.query.apiKey;
-  
-  if (!apiKey || apiKey !== process.env.ADMIN_API_KEY) {
-    // For demo purposes, we'll allow access without authentication
-    // In production, uncomment the following lines:
-    // return res.status(401).json({
-    //   success: false,
-    //   message: 'Unauthorized access'
-    // });
-  }
-  
+  // Authentication removed - allow direct access
   next();
 };
 
 // Get dashboard statistics
 router.get('/stats', authenticateAdmin, async (req, res) => {
   try {
-    const stats = await registrationHelpers.getRegistrationStats();
+    const stats = await getRegistrationStats();
     
     res.json({
       success: true,
@@ -54,7 +69,7 @@ router.get('/registrations', authenticateAdmin, async (req, res) => {
       status 
     } = req.query;
 
-    let registrations = await registrationHelpers.getAllRegistrations();
+    let registrations = await getCollection(COLLECTIONS.REGISTRATIONS, 'submittedAt', 'desc');
 
     // Apply filters
     if (search) {
@@ -123,7 +138,7 @@ router.get('/registrations', authenticateAdmin, async (req, res) => {
 router.get('/registrations/:id', authenticateAdmin, async (req, res) => {
   try {
     const { id } = req.params;
-    const registration = await registrationHelpers.getRegistration(id);
+    const registration = await getDocument(COLLECTIONS.REGISTRATIONS, id);
 
     if (!registration) {
       return res.status(404).json({
@@ -184,7 +199,7 @@ router.put('/registrations/:id', authenticateAdmin, async (req, res) => {
       }
     }
 
-    const success = await registrationHelpers.updateRegistration(id, updateData);
+    const success = await updateDocument(COLLECTIONS.REGISTRATIONS, id, updateData);
 
     if (!success) {
       return res.status(404).json({
@@ -213,7 +228,7 @@ router.delete('/registrations/:id', authenticateAdmin, async (req, res) => {
     const { id } = req.params;
 
     // Get registration to access file URLs
-    const registration = await registrationHelpers.getRegistration(id);
+    const registration = await getDocument(COLLECTIONS.REGISTRATIONS, id);
     
     if (!registration) {
       return res.status(404).json({
@@ -225,7 +240,7 @@ router.delete('/registrations/:id', authenticateAdmin, async (req, res) => {
     // Delete associated files from S3
     if (registration.files) {
       try {
-        await registrationUploads.deleteRegistrationFiles(registration.files);
+        await deleteRegistrationFiles(registration.files);
       } catch (fileDeleteError) {
         console.error('File deletion error:', fileDeleteError);
         // Continue with registration deletion even if file deletion fails
@@ -233,7 +248,7 @@ router.delete('/registrations/:id', authenticateAdmin, async (req, res) => {
     }
 
     // Delete registration from Firestore
-    await registrationHelpers.deleteRegistration(id);
+    await deleteDocument(COLLECTIONS.REGISTRATIONS, id);
 
     res.json({
       success: true,
@@ -271,12 +286,12 @@ router.post('/registrations/bulk-action', authenticateAdmin, async (req, res) =>
       try {
         switch (action) {
           case 'delete':
-            const registration = await registrationHelpers.getRegistration(id);
+            const registration = await getDocument(COLLECTIONS.REGISTRATIONS, id);
             if (registration) {
               if (registration.files) {
-                await registrationUploads.deleteRegistrationFiles(registration.files);
+                await deleteRegistrationFiles(registration.files);
               }
-              await registrationHelpers.deleteRegistration(id);
+              await deleteDocument(COLLECTIONS.REGISTRATIONS, id);
               results.success++;
             } else {
               results.failed++;
@@ -290,7 +305,7 @@ router.post('/registrations/bulk-action', authenticateAdmin, async (req, res) =>
               results.errors.push(`No update data provided for ${id}`);
               break;
             }
-            const updateSuccess = await registrationHelpers.updateRegistration(id, data);
+            const updateSuccess = await updateDocument(COLLECTIONS.REGISTRATIONS, id, data);
             if (updateSuccess) {
               results.success++;
             } else {
@@ -329,7 +344,7 @@ router.get('/export', authenticateAdmin, async (req, res) => {
   try {
     const { format = 'json', ...filters } = req.query;
     
-    let registrations = await registrationHelpers.getAllRegistrations();
+    let registrations = await getCollection(COLLECTIONS.REGISTRATIONS, 'submittedAt', 'desc');
 
     // Apply same filters as in get registrations
     if (filters.search) {

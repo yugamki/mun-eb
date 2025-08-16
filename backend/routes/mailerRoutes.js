@@ -1,6 +1,6 @@
 const express = require('express');
 const nodemailer = require('nodemailer');
-const { registrationHelpers } = require('../utils/firebase');
+const { getCollection, getDocument, COLLECTIONS } = require('../utils/firebase');
 
 const router = express.Router();
 
@@ -72,44 +72,38 @@ const emailTemplates = {
 // SMTP configurations
 const smtpConfigs = {
   gmail: {
-    host: 'smtp.gmail.com',
-    port: 587,
+    host: process.env.SMTP_HOST_GMAIL,
+    port: process.env.SMTP_PORT_GMAIL,
     secure: false,
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
+      user: process.env.SMTP_USER_GMAIL,
+      pass: process.env.SMTP_PASS_GMAIL
     }
   },
   outlook: {
-    host: 'smtp-mail.outlook.com',
-    port: 587,
+    host: process.env.SMTP_HOST_OUTLOOK,
+    port: process.env.SMTP_PORT_OUTLOOK,
     secure: false,
     auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
-    }
-  },
-  custom: {
-    host: process.env.SMTP_HOST,
-    port: parseInt(process.env.SMTP_PORT) || 587,
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS
+      user: process.env.SMTP_USER_OUTLOOK,
+      pass: process.env.SMTP_PASS_OUTLOOK
     }
   }
 };
 
-// Middleware for admin authentication
+// Middleware for admin authentication - removed as requested
 const authenticateAdmin = (req, res, next) => {
-  // Simplified authentication for demo
+  // Authentication removed - allow direct access
   next();
 };
 
 // Create transporter
-function createTransporter(provider = 'custom') {
-  const config = smtpConfigs[provider] || smtpConfigs.custom;
-  return nodemailer.createTransporter(config);
+function createTransport(provider = 'gmail') {
+  const config = smtpConfigs[provider];
+  if (!config) {
+    throw new Error(`Unsupported email provider: ${provider}`);
+  } 
+  return nodemailer.createTransport(config);
 }
 
 // Template replacement function
@@ -130,16 +124,26 @@ router.post('/send-mail', authenticateAdmin, async (req, res) => {
       subject,
       message,
       template = 'custom',
-      smtpProvider = 'custom',
+      smtpProvider = 'gmail',
       cc = [],
       bcc = []
     } = req.body;
 
+    // Debug logging
+    console.log('Received mail request:', {
+      recipients,
+      subject,
+      message: message ? 'Message provided' : 'No message',
+      smtpProvider,
+      bodyKeys: Object.keys(req.body)
+    });
+
     // Validation
-    if (!recipients || recipients.length === 0) {
+    if (!recipients || (Array.isArray(recipients) && recipients.length === 0)) {
       return res.status(400).json({
         success: false,
-        message: 'Recipients are required'
+        message: 'Recipients are required',
+        debug: { receivedRecipients: recipients, type: typeof recipients }
       });
     }
 
@@ -153,12 +157,40 @@ router.post('/send-mail', authenticateAdmin, async (req, res) => {
     // Get recipient emails
     let recipientEmails = [];
     
-    if (recipients.includes('all')) {
+    // Parse recipients - now always array or string
+    let recipientsArray;
+    if (Array.isArray(recipients)) {
+      recipientsArray = recipients;
+    } else if (typeof recipients === 'string') {
+      recipientsArray = [recipients];
+    } else {
+      recipientsArray = [recipients];
+    }
+    
+    console.log('Parsed recipients:', recipientsArray);
+    
+    if (recipientsArray.includes('all')) {
       // Get all registrant emails
-      const registrations = await registrationHelpers.getAllRegistrations();
+      const registrations = await getCollection(COLLECTIONS.REGISTRATIONS, 'submittedAt', 'desc');
       recipientEmails = registrations.map(reg => reg.email);
     } else {
-      recipientEmails = recipients.filter(email => email !== 'all');
+      // Check if it's a single email (not a committee code)
+      const isSingleEmail = recipientsArray.length === 1 && recipientsArray[0].includes('@');
+      
+      if (isSingleEmail) {
+        // Single email recipient
+        recipientEmails = recipientsArray;
+      } else {
+        // Handle committee-specific recipients
+        const registrations = await getCollection(COLLECTIONS.REGISTRATIONS, 'submittedAt', 'desc');
+        
+        recipientsArray.forEach(committee => {
+          const committeeRegistrations = registrations.filter(reg => 
+            Array.isArray(reg.committees) && reg.committees.includes(committee.toUpperCase())
+          );
+          recipientEmails.push(...committeeRegistrations.map(reg => reg.email));
+        });
+      }
     }
 
     if (recipientEmails.length === 0) {
@@ -168,8 +200,8 @@ router.post('/send-mail', authenticateAdmin, async (req, res) => {
       });
     }
 
-    // Create transporter
-    const transporter = createTransporter(smtpProvider);
+    // Create transporter based on selected provider
+    const transporter = createTransport(smtpProvider);
 
     // Verify SMTP connection
     try {
@@ -178,7 +210,7 @@ router.post('/send-mail', authenticateAdmin, async (req, res) => {
       console.error('SMTP verification failed:', verifyError);
       return res.status(500).json({
         success: false,
-        message: 'Email configuration error. Please check SMTP settings.'
+        message: `Email configuration error for ${smtpProvider}. Please check SMTP settings.`
       });
     }
 
@@ -195,7 +227,7 @@ router.post('/send-mail', authenticateAdmin, async (req, res) => {
     for (const email of recipientEmails) {
       try {
         // Get registration data for personalization
-        const registrations = await registrationHelpers.getAllRegistrations();
+        const registrations = await getCollection(COLLECTIONS.REGISTRATIONS, 'submittedAt', 'desc');
         const registration = registrations.find(reg => reg.email === email);
         
         const templateVariables = {
@@ -267,12 +299,12 @@ router.post('/send-welcome', authenticateAdmin, async (req, res) => {
       });
     }
 
-    const transporter = createTransporter();
+    const transporter = createTransport();
     const results = { sent: 0, failed: 0, errors: [] };
 
     for (const id of registrationIds) {
       try {
-        const registration = await registrationHelpers.getRegistration(id);
+        const registration = await getDocument(COLLECTIONS.REGISTRATIONS, id);
         
         if (!registration) {
           results.failed++;
@@ -349,7 +381,7 @@ router.post('/test-smtp', authenticateAdmin, async (req, res) => {
       });
     }
 
-    const transporter = createTransporter(provider);
+    const transporter = createTransport(provider);
 
     // Verify connection
     await transporter.verify();

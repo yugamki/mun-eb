@@ -92,16 +92,7 @@
                             </div>
                         </div>
                     </div>
-                    <div class="charts-container">
-                        <div class="chart-card">
-                            <h4>Committee Preferences</h4>
-                            <canvas id="committeeChart"></canvas>
-                        </div>
-                        <div class="chart-card">
-                            <h4>Position Preferences</h4>
-                            <canvas id="positionChart"></canvas>
-                        </div>
-                    </div>
+
                 </div>
 
                 <!-- Registrations Tab -->
@@ -112,21 +103,27 @@
                             <input type="text" id="searchInput" placeholder="Search registrations...">
                         </div>
                         <div class="filter-controls">
-                            <select id="committeeFilter">
-                                <option value="">All Committees</option>
-                                <option value="UNSC">UNSC</option>
-                                <option value="UNODC">UNODC</option>
-                                <option value="LOK SABHA">LOK SABHA</option>
-                                <option value="CCC">CCC</option>
-                                <option value="IPC">IPC</option>
-                                <option value="DISEC">DISEC</option>
-                            </select>
-                            <select id="positionFilter">
-                                <option value="">All Positions</option>
-                                <option value="Chairperson">Chairperson</option>
-                                <option value="Vice-Chairperson">Vice-Chairperson</option>
-                                <option value="Director">Director</option>
-                            </select>
+                            <div class="custom-select">
+                                <select id="committeeFilter" class="select-styled">
+                                    <option value="">All Committees</option>
+                                    <option value="UNSC">UNSC</option>
+                                    <option value="UNODC">UNODC</option>
+                                    <option value="LOK SABHA">LOK SABHA</option>
+                                    <option value="CCC">CCC</option>
+                                    <option value="IPC">IPC</option>
+                                    <option value="DISEC">DISEC</option>
+                                </select>
+                                <i class="fas fa-chevron-down select-arrow"></i>
+                            </div>
+                            <div class="custom-select">
+                                <select id="positionFilter" class="select-styled">
+                                    <option value="">All Positions</option>
+                                    <option value="Chairperson">Chairperson</option>
+                                    <option value="Vice-Chairperson">Vice-Chairperson</option>
+                                    <option value="Director">Director</option>
+                                </select>
+                                <i class="fas fa-chevron-down select-arrow"></i>
+                            </div>
                         </div>
                         <button id="exportBtn" class="btn btn-primary">
                             <i class="fas fa-download"></i>
@@ -155,10 +152,23 @@
                 <!-- Mailer Tab -->
                 <div id="mailerTab" class="tab-content">
                     <form id="mailerForm" class="mailer-form">
-                        <div class="form-grid">
-                            <div class="form-group">
-                                <label for="recipients">Recipients</label>
-                                <select id="recipients" name="recipients" multiple>
+                        <!-- Recipient Type Tabs -->
+                        <div class="mailer-tabs">
+                            <button type="button" class="mailer-tab-btn active" data-recipient-type="registrants">
+                                <i class="fas fa-users"></i>
+                                Send to Registrants
+                            </button>
+                            <button type="button" class="mailer-tab-btn" data-recipient-type="single">
+                                <i class="fas fa-user"></i>
+                                Send to Single Person
+                            </button>
+                        </div>
+                        
+                        <!-- Recipients Section -->
+                        <div class="form-group" id="recipientsGroup">
+                            <label for="recipients">Recipients</label>
+                            <div class="custom-select">
+                                <select id="recipients" name="recipients" class="select-styled" multiple>
                                     <option value="all">All Registrants</option>
                                     <option value="unsc">UNSC Applicants</option>
                                     <option value="unodc">UNODC Applicants</option>
@@ -167,16 +177,38 @@
                                     <option value="ipc">IPC Applicants</option>
                                     <option value="disec">DISEC Applicants</option>
                                 </select>
-                            </div>
-                            <div class="form-group">
-                                <label for="subject">Subject</label>
-                                <input type="text" id="subject" name="subject" required>
+                                <i class="fas fa-chevron-down select-arrow"></i>
                             </div>
                         </div>
+                        
+                        <!-- Single Email Section -->
+                        <div class="form-group" id="singleEmailGroup" style="display: none;">
+                            <label for="singleEmail">Email Address</label>
+                            <input type="email" id="singleEmail" name="singleEmail" placeholder="Enter email address">
+                        </div>
+                        
+                        <!-- Email Provider -->
+                        <div class="form-group">
+                            <label for="emailProvider">Email Provider</label>
+                            <div class="custom-select">
+                                <select id="emailProvider" name="emailProvider" class="select-styled">
+                                    <option value="gmail">Gmail</option>
+                                    <option value="outlook">Outlook</option>
+                                </select>
+                                <i class="fas fa-chevron-down select-arrow"></i>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label for="subject">Subject</label>
+                            <input type="text" id="subject" name="subject" required>
+                        </div>
+                        
                         <div class="form-group">
                             <label for="message">Message</label>
                             <textarea id="message" name="message" rows="10" required></textarea>
                         </div>
+                        
                         <div class="form-actions">
                             <button type="submit" class="btn btn-primary">
                                 <i class="fas fa-paper-plane"></i>
@@ -217,9 +249,43 @@
         </div>
     </div>
 
+    <!-- Email Preview Modal -->
+    <div id="emailPreviewModal" class="modal">
+        <div class="modal-content email-preview-modal">
+            <div class="modal-header">
+                <i class="fas fa-envelope"></i>
+                <h3>Email Preview</h3>
+                <button class="modal-close" id="closeEmailPreview">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="email-preview-content">
+                    <div class="email-header">
+                        <div class="email-subject">
+                            <strong>Subject:</strong> <span id="previewSubject"></span>
+                        </div>
+                        <div class="email-to">
+                            <strong>To:</strong> <span id="previewTo"></span>
+                        </div>
+                    </div>
+                    <div class="email-body" id="previewBody">
+                        <!-- Email content will be inserted here -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button id="sendFromPreview" class="btn btn-primary">
+                    <i class="fas fa-paper-plane"></i>
+                    Send Email
+                </button>
+                <button id="closePreviewModal" class="btn btn-outline">Close</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Load external libraries -->
     <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     
     <!-- Load our scripts after external libraries -->
